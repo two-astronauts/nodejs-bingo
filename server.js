@@ -4,34 +4,46 @@ const http = require('http');
 const server = http.createServer(app);
 const io = require('socket.io')(server, {
     cors: {
-        origin: 'http://localhost:4200',
+        origin: ['http://localhost:4200', 'https://angular-bingo.herokuapp.com'],
         methods: ['GET', 'POST']
     }
 });
 
+const { Worker } = require('worker_threads');
+
 var names = [];
 var isGameStarted = false;
 var numbers = [];
+let test = false;
 
-const generateArray = (min, max) => {
-    let arrayContainer = [];
-    const genNum = Math.floor(Math.random() * (max - min + 1) + min);
-    arrayContainer.push(genNum);
-    console.time();
-    for (let counter = 0; counter < 4; counter++) {
-        let newGen = Math.floor(Math.random() * (max - min + 1) + min);
-        while (arrayContainer.lastIndexOf(newGen) !== -1) {
-            newGen = Math.floor(Math.random() * (max - min + 1) + min);
-        }
-        arrayContainer.push(newGen);
+function runService(workerData) {
+    return new Promise((resolve, reject) => {
+        const worker = new Worker('./service.js', { workerData });
+        worker.on('message', resolve);
+        worker.on('error', reject);
+        worker.on('exit', (code) => {
+            if (code !== 0) {
+                reject(new Error(`Worker stopped with exit code ${code}`));
+            }
+        })
+    })
+}
+
+async function run(socket) {
+    let time = 100;
+    if (!test) {
+        time = 5000;
+        test = true;
     }
-    console.timeEnd();
-    return arrayContainer;
-};
+    const result = await runService(time);
+    io.to(socket.id).emit('table', result);
+    console.log(result);
+}
 
 const newGame = () => {
+    test = false;
     isGameStarted = true;
-    numbers = Array.from({length: 75}, (_, i) => i + 1);
+    numbers = Array.from({ length: 75 }, (_, i) => i + 1);
     sendNumber();
 };
 
@@ -48,7 +60,7 @@ const sendNumber = () => {
                 }, 3000);
             } else {
                 if (isGameStarted) {
-                    io.emit('message', { message: 'No hay un ganador en este juego', type: 'warning'});
+                    io.emit('message', { message: 'No hay un ganador en este juego', type: 'warning' });
                 }
                 endGame();
             }
@@ -58,15 +70,15 @@ const sendNumber = () => {
 
 const getWord = (number) => {
     switch (true) {
-        case (number <= 15) :
+        case (number <= 15):
             return 'B';
-        case (number <= 30) :
+        case (number <= 30):
             return 'I';
-        case (number <= 45) :
+        case (number <= 45):
             return 'N';
-        case (number <= 60) :
+        case (number <= 60):
             return 'G';
-        case (number <= 75) :
+        case (number <= 75):
             return 'O';
         default:
             console.log(`Sorry, we are out of ${number}.`);
@@ -91,14 +103,6 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
     console.log('a user connected');
 
-    let b = generateArray(1, 15);
-    let i = generateArray(16, 30);
-    let n = generateArray(31, 45);
-    let g = generateArray(46, 60);
-    let o = generateArray(61, 75);
-
-    io.to(socket.id).emit('table', { b, i, n, g, o });
-
     socket.on('message', (message) => {
         console.log(message);
     });
@@ -108,6 +112,7 @@ io.on('connection', (socket) => {
         names.push(socket.data.user.name);
         io.emit('name', names);
         io.emit('message', { message: `Bienvenido ${message}`, type: 'info' });
+        run(socket).catch(err => console.error(err));
         if (names.length >= 2 && !isGameStarted) {
             newGame();
         }
@@ -115,7 +120,7 @@ io.on('connection', (socket) => {
 
     socket.on('win', (message) => {
         if (isGameStarted) {
-            io.emit('message', { message: `El ganador es ${socket.data.user.name}`, type: 'win'});
+            io.emit('message', { message: `BINGO! El ganador es ${socket.data.user.name}`, type: 'win' });
             endGame();
         }
     });
